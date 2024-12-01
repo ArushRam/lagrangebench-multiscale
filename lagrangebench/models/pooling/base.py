@@ -9,9 +9,7 @@ class BasePooling(hk.Module, ABC):
     """Base model class. All models must inherit from this class."""
 
     @abstractmethod
-    def __call__(
-        self, sample: Tuple[Dict[str, jnp.ndarray], jnp.ndarray]
-    ) -> Tuple[Dict[str, jnp.ndarray], jnp.ndarray]:
+    def __call__(self, positions: jnp.ndarray, particle_type: jnp.ndarray) -> Tuple[Dict[str, jnp.ndarray], jnp.ndarray]:
         """Forward pass.
 
         We specify the dimensions of the inputs and outputs using the number of nodes N,
@@ -19,8 +17,10 @@ class BasePooling(hk.Module, ABC):
         and the dimensionality of the feature vectors dim.
 
         Args:
-            sample: Tuple with feature dictionary and particle type. Since pooling / clustering is done positionally, it must include position information.
-                - "abs_pos" (N, K+1, dim), absolute positions
+            positions: Array containing positional coordinates for each node.
+                - shape: (N, dim), absolute positions
+            particle_type: Array containing particle types for each node.
+                - shape: (N), integers
         Returns:
             Tuple with dictionary of cluster information and coarse particle types. 
                 - Dictionary contains:

@@ -2,6 +2,7 @@ from typing import Dict, Tuple
 
 import haiku as hk
 import jax.numpy as jnp
+import numpy as np
 
 from .base import BasePooling
 
@@ -25,26 +26,43 @@ class VoxelClustering(BasePooling):
     # Apply the module
     coarse_sample, new_particle_types = voxel_clustering_fn.apply(params, features, particle_type)
     '''
+    # def __init__(self, voxel_size, bounds, num_particle_types, size):
     def __init__(self, voxel_size, bounds, num_particle_types):
-        '''
+        """
         Arguments:
-            - voxel_size (dimension of a single voxel)
-            - bounds (dx2 array, rows correspond to dimension, columns correspond to min/max bound)
-        '''
+            - voxel_size (float): Dimension of a single voxel.
+            - bounds (jnp.ndarray): Bounds of the simulation space.
+            - num_particle_types (int): Number of unique particle types.
+            - size (int): Precomputed size for unique combinations.
+        """
         super().__init__()
         self.voxel_size = voxel_size
         self.dim = bounds.shape[0]
-        self.bounds_max = bounds[:,1]
-        self.bounds_min = bounds[:,0]
+        self.bounds_max = bounds[:, 1]
+        self.bounds_min = bounds[:, 0]
         self.grid_size = (self.bounds_max - self.bounds_min) / self.voxel_size
         self.num_particle_types = num_particle_types
-        self.size = (self.num_particle_types * jnp.prod(self.grid_size)).astype(int)
+        # self.size = size  # Directly use precomputed size
 
-    def __call__(self, features: Dict[str, jnp.ndarray], particle_type: jnp.ndarray) -> Tuple[Dict[str, jnp.ndarray], jnp.ndarray]:
+    def __call__(self, positions: jnp.ndarray, particle_type: jnp.ndarray) -> Tuple[Dict[str, jnp.ndarray], jnp.ndarray]:
+        """Forward pass of VoxelClustering.
 
+        We specify the dimensions of the inputs and outputs using the number of nodes N,
+        the number of edges E, number of historic velocities K (=input_seq_length - 1),
+        and the dimensionality of the feature vectors dim.
+
+        Args:
+            positions: Array containing positional coordinates for each node.
+                - shape: (N, dim), absolute positions
+            particle_type: Array containing particle types for each node.
+                - shape: (N), integers
+        Returns:
+            Tuple with dictionary of cluster information and coarse particle types. 
+                - Dictionary contains:
+                    - "coarse_ids" (N) - assignments for each original node
+                - Particle types: (N') - types for each coarse-level particle
+        """
         index_assignments = jnp.zeros_like(particle_type, dtype=int)
-
-        positions = features['abs_pos'][:,-1]
 
         # 1. map each node position to an index
         voxel_indices = ((positions - self.bounds_min) // self.voxel_size).astype(int)
@@ -59,12 +77,12 @@ class VoxelClustering(BasePooling):
         combined_indices = jnp.stack([flattened_voxel_indices, particle_type], axis=-1)
 
         # 4. Get unique combinations and inverse indices
-        unique_combinations, inverse_indices = jnp.unique(combined_indices, axis=0, return_inverse=True, size=self.size)
+        unique_combinations, inverse_indices = jnp.unique(combined_indices, axis=0, return_inverse=True) # , size=self.size)
 
         # 5. Extract unique particle types from unique_combinations
         unique_particle_types = unique_combinations[:, 1].astype(int)
 
-        index_assignments = inverse_indices
+        index_assignments = inverse_indices[:,0]
         coarse_sample = {
             'coarse_ids': index_assignments
         }

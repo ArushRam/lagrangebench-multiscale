@@ -9,6 +9,7 @@ import haiku as hk
 import jax.numpy as jnp
 import jraph
 import jax
+import numpy as np
 
 from lagrangebench.utils import NodeType
 
@@ -60,11 +61,31 @@ class MultiScaleGNS(BaseModel):
         if clustering_type == "voxel":
             self._base_voxel_size = 5e-2
             self._voxel_size_per_scale = [self._base_voxel_size * (2 ** i) for i in range(num_scales - 1)]
+            bounds = np.array([[0.0, 1.0], [0.0, 2.0]])  # Example bounds
+            # grid_sizes = [
+            #     np.ceil((bounds[:, 1] - bounds[:, 0]) / voxel_size).astype(int)
+            #     for voxel_size in self._voxel_size_per_scale
+            # ]
+            # self.sizes = [
+            #     int(num_particle_types * np.prod(grid_size))
+            #     for grid_size in grid_sizes
+            # ]
+            # self._clustering_fn_per_scale = [
+            #     VoxelClustering(
+            #         voxel_size=self._voxel_size_per_scale[i],
+            #         bounds=jnp.array(bounds),
+            #         num_particle_types=self._num_particle_types,
+            #         size=self.sizes[i],  # Pass precomputed size
+            #     )
+            #     for i in range(num_scales - 1)
+            # ]
             self._clustering_fn_per_scale = [
                 VoxelClustering(
-                    voxel_size=self._voxel_size_per_scale[i], 
-                    bounds=jnp.array([[0.0, 1.0], [0.0, 2.0]]), 
-                ) for i in range(num_scales - 1)
+                    voxel_size=self._voxel_size_per_scale[i],
+                    bounds=jnp.array(bounds),
+                    num_particle_types=self._num_particle_types,
+                )
+                for i in range(num_scales - 1)
             ]
         else:
             raise ValueError(f"Unknown clustering type: {clustering_type}")
@@ -153,7 +174,7 @@ class MultiScaleGNS(BaseModel):
             new_receivers = unique_pairs[:,1]
             
             # Pool edge features by taking mean within each unique cluster pair
-            new_edges = self._scatter_fn(edges, inverse_indices[:, 0])
+            new_edges = self._scatter_fn(edges, inverse_indices[:, 0]) #, self.sizes[scale])
             
             return new_edges, new_senders, new_receivers
         
@@ -162,8 +183,8 @@ class MultiScaleGNS(BaseModel):
         clusters = coarse_sample['coarse_ids']
         
         # Pool node features and positions
-        pooled_nodes = self._scatter_fn(graph.nodes, clusters)
-        pooled_pos = self._scatter_fn(pos, clusters)  # e.g., cluster centroids
+        pooled_nodes = self._scatter_fn(graph.nodes, clusters) #, self.sizes[scale])
+        pooled_pos = self._scatter_fn(pos, clusters) #, self.sizes[scale])  # e.g., cluster centroids
         
         # Create new edges between clusters
         new_edges, new_senders, new_receivers = create_cluster_edges(graph.edges, graph.senders, graph.receivers, clusters)
@@ -187,7 +208,7 @@ class MultiScaleGNS(BaseModel):
         """Upscale graph through unpooling based on cluster assignments"""
         # Unpool node features from coarse to fine graph using cluster assignments
         fine_nodes = graph_coarse.nodes[clusters]
-        
+
         # Unpool edge features by mapping coarse edges back to fine edges
         fine_cluster_pairs = jnp.stack([clusters[graph_fine.senders], clusters[graph_fine.receivers]], axis=1) # (n_fine_edges, 2)
         coarse_cluster_pairs = jnp.stack([graph_coarse.senders, graph_coarse.receivers], axis=1) # (n_coarse_edges, 2)
@@ -260,7 +281,7 @@ class MultiScaleGNS(BaseModel):
             # Upward pass: scale + 1 -> scale
             for scale in reversed(range(self._num_scales - 1)):
                 print(f"Upward pass: scale {scale + 1} -> {scale}")
-                graphs[scale] = self._up_mp(graphs[scale + 1], graphs[scale], clusters_at_scales[scale])
+                graphs[scale] = self._up_mp(graphs[scale], graphs[scale + 1], clusters_at_scales[scale])
                 for _ in range(self._mp_steps_per_scale[scale] // 2):
                     graphs[scale] = self._within_scale_message_passing(graphs[scale])
                 

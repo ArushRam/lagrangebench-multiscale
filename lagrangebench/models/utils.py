@@ -137,6 +137,7 @@ def features_2d_to_3d(features):
 
     return features
 
+# def scatter_mean(features: jnp.ndarray, indices: jnp.ndarray, num_segments: int) -> jnp.ndarray:
 def scatter_mean(features: jnp.ndarray, indices: jnp.ndarray) -> jnp.ndarray:
     """Scatter-mean operation implemented with JAX.
     Args:
