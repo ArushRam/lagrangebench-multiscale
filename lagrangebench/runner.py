@@ -214,6 +214,19 @@ def setup_model(
             )(x)
 
         MODEL = models.GNS
+    elif model_name == "ms_gns":
+        def model_fn(x):
+            return models.MultiScaleGNS(
+                particle_dimension=metadata["dim"],
+                latent_size=cfg.model.latent_dim,
+                blocks_per_step=cfg.model.num_mlp_layers,
+                num_particle_types=NodeType.SIZE,
+                particle_type_embedding_size=16,
+                num_scales=cfg.model.num_scales,
+                mp_steps_per_scale=cfg.model.mp_steps_per_scale,
+                clustering_type=cfg.model.clustering_type,
+            )(x)
+        MODEL = models.MultiScaleGNS
     elif model_name == "segnn":
         # Hx1o vel, Hx0e vel, 2x1o boundary, 9x0e type
         node_feature_irreps = node_irreps(

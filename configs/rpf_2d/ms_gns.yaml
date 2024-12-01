@@ -1,0 +1,12 @@
+extends: configs/rpf_2d/base.yaml
+
+model: 
+  name: ms_gns
+  latent_dim: 128
+  num_scales: 4
+  mp_steps_per_scale: [10, 6, 6, 4]
+  clustering_type: voxel
+
+train:
+  optimizer:
+    lr_start: 5.e-4

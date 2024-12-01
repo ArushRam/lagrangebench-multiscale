@@ -136,3 +136,29 @@ def features_2d_to_3d(features):
         )
 
     return features
+
+def scatter_mean(features: jnp.ndarray, indices: jnp.ndarray) -> jnp.ndarray:
+    """Scatter-mean operation implemented with JAX.
+    Args:
+        features: Array of shape [N, ...] to be scattered
+        indices: Array of shape [N] containing indices where to scatter
+    
+    Returns:
+        Array of scattered and averaged features
+    """
+    # Get number of unique indices
+    num_segments = jnp.max(indices) + 1
+    
+    # Sum features for each index
+    summed = jax.ops.segment_sum(features, indices, num_segments)
+    
+    # Count occurrences of each index
+    counts = jax.ops.segment_sum(jnp.ones_like(indices, dtype=features.dtype), indices, num_segments)
+    
+    # Compute mean by dividing sum by counts (avoiding division by zero)
+    counts = jnp.maximum(counts, 1)
+    counts = jnp.expand_dims(counts, axis=tuple(range(1, features.ndim)))
+    
+    means = summed / counts
+    
+    return means
