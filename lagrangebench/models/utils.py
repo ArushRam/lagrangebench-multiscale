@@ -163,3 +163,40 @@ def scatter_mean(features: jnp.ndarray, indices: jnp.ndarray) -> jnp.ndarray:
     means = summed / counts
     
     return means
+
+def scatter_mean_new(src, idx, num_segments):
+    """Compute scatter mean that works with JAX tracers and handles filler values.
+    
+    Args:
+        src: Source values to scatter (first dimension must match idx)
+        idx: Index values indicating where to scatter (-1 filler values allowed at end)
+        num_segments: Number of segments to scatter into
+        
+    Returns:
+        Array with scattered mean values
+    """
+    # Mask out filler values
+    mask = idx != -1
+    src_shape = src.shape
+    src_flat = src.reshape(src_shape[0], -1)
+    src_masked = jnp.where(mask[:, None], src_flat, 0.0)
+    
+    # Map filler indices to a new segment beyond num_segments
+    idx_adjusted = jnp.where(mask, idx, num_segments)
+    
+    # Sum values for each segment, including the filler segment
+    sum_scattered = jax.ops.segment_sum(src_masked, idx_adjusted, num_segments + 1)
+    
+    # Count number of elements per segment
+    ones = jnp.where(mask[:, None], jnp.ones_like(src_masked), 0.0)
+    counts = jax.ops.segment_sum(ones, idx_adjusted, num_segments + 1)
+    
+    # Handle empty segments and remove the filler segment
+    counts = jnp.where(counts == 0, 1.0, counts)
+    sum_scattered = sum_scattered[:num_segments]
+    counts = counts[:num_segments]
+    
+    # Reshape the result to match the input shape (minus the first dimension)
+    result = (sum_scattered / counts).reshape((num_segments,) + src_shape[1:])
+    
+    return result
