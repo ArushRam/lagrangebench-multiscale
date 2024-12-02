@@ -23,3 +23,6 @@ dist
 
 # Sphinx documentation
 docs/_build/
+
+# result visualization
+media/
