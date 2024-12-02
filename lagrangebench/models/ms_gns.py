@@ -17,7 +17,7 @@ from .base import BaseModel
 from .utils import build_mlp, scatter_mean_new
 from .pooling import VoxelClustering
 
-MAX_SIZE = 30000
+MAX_SIZE = 40000
 
 class MultiScaleGNS(BaseModel):
     r"""Multi-scale Graph Network-based Simulator.
@@ -35,6 +35,7 @@ class MultiScaleGNS(BaseModel):
         num_scales: int = 1,
         mp_steps_per_scale: List[int] = [10],
         clustering_type: str = "voxel",
+        max_size: int = MAX_SIZE,
     ):
         """Initialize the model.
 
@@ -64,7 +65,7 @@ class MultiScaleGNS(BaseModel):
             self._voxel_size_per_scale = [self._base_voxel_size * (2 ** i) for i in range(num_scales - 1)]
             bounds = np.array([[0.0, 1.0], [0.0, 2.0]])  # Example bounds
             
-            self.max_size = MAX_SIZE
+            self._max_size = max_size
             # grid_sizes = [
             #     np.ceil((bounds[:, 1] - bounds[:, 0]) / voxel_size).astype(int)
             #     for voxel_size in self._voxel_size_per_scale
@@ -78,7 +79,7 @@ class MultiScaleGNS(BaseModel):
                     voxel_size=self._voxel_size_per_scale[i],
                     bounds=jnp.array(bounds),
                     num_particle_types=self._num_particle_types,
-                    size=self.max_size,
+                    size=self._max_size,
                 )
                 for i in range(num_scales - 1)
             ]
@@ -92,12 +93,11 @@ class MultiScaleGNS(BaseModel):
             # ]
         else:
             raise ValueError(f"Unknown clustering type: {clustering_type}")
-        self._scatter_fn = partial(scatter_mean_new, num_segments=self.max_size)
+        self._scatter_fn = partial(scatter_mean_new, num_segments=self._max_size)
 
         self._embedding = hk.Embed(
             num_particle_types, particle_type_embedding_size
         )  # (9, 16)
-
 
     def _encoder(self, graph: jraph.GraphsTuple) -> jraph.GraphsTuple:
         """MLP graph encoder."""
@@ -120,6 +120,7 @@ class MultiScaleGNS(BaseModel):
     def _processor(self, graph: jraph.GraphsTuple, particle_type: jnp.ndarray, positions: jnp.ndarray) -> jraph.GraphsTuple:
         """Sequence of Graph Network blocks with multi-scale processing."""
         
+        graphs = []
         if self._num_scales == 1:
             # No multi-scale processing
             for _ in range(self._mp_steps_per_scale[0]):
@@ -127,7 +128,6 @@ class MultiScaleGNS(BaseModel):
             graphs[0] = graph
         else:
             # Store graphs and positions at each scale
-            graphs = [graph]
             clusters_at_scales = []
 
             # Original resolution message passing
@@ -135,15 +135,13 @@ class MultiScaleGNS(BaseModel):
                 graph = self._within_scale_message_passing(graph)
                 
             # Fill graph attributes with filler values
-            graph = self._fill_graph(graph, self.max_size)
-            particle_type = jnp.concatenate([particle_type, jnp.full((self.max_size - particle_type.shape[0],), -1)])
-            positions = jnp.concatenate([positions, jnp.full((self.max_size - positions.shape[0], self._output_size), 0.0)])
-            
-            graphs[0] = graph
+            graph = self._fill_graph(graph, self._max_size)
+            particle_type = jnp.concatenate([particle_type, jnp.full((self._max_size - particle_type.shape[0],), -1)])
+            positions = jnp.concatenate([positions, jnp.full((self._max_size - positions.shape[0], self._output_size), 0.0)])
+            graphs.append(graph)
             
             # Downward pass: scale -> scale + 1
             for scale in range(self._num_scales - 1):
-                # print(f"Downward pass: scale {scale} -> {scale + 1}")
                 # Down message passing with positions
                 coarse_graph, coarse_particle_types, coarse_pos, clusters = self._down_mp(
                     scale,
@@ -171,7 +169,6 @@ class MultiScaleGNS(BaseModel):
             
             # Upward pass: scale + 1 -> scale
             for scale in reversed(range(self._num_scales - 1)):
-                # print(f"Upward pass: scale {scale + 1} -> {scale}")
                 graphs[scale] = self._up_mp(graphs[scale], graphs[scale + 1], clusters_at_scales[scale])
                 for _ in range(self._mp_steps_per_scale[scale] // 2):
                     graphs[scale] = self._within_scale_message_passing(graphs[scale])
@@ -327,7 +324,7 @@ class MultiScaleGNS(BaseModel):
                 cluster_pairs, 
                 axis=0, 
                 return_inverse=True, 
-                size=self.max_size + 1, 
+                size=self._max_size + 1, 
                 fill_value=-jnp.ones(cluster_pairs.shape[1], dtype=cluster_pairs.dtype)
             )
             
