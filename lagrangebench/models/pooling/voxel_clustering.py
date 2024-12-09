@@ -26,8 +26,8 @@ class VoxelClustering(BasePooling):
     # Apply the module
     coarse_sample, new_particle_types = voxel_clustering_fn.apply(params, features, particle_type)
     '''
-    def __init__(self, voxel_size, bounds, num_particle_types, size):
-    # def __init__(self, voxel_size, bounds, num_particle_types):
+    # def __init__(self, voxel_size, bounds, num_particle_types, size):
+    def __init__(self, voxel_size, bounds, num_particle_types):
         """
         Arguments:
             - voxel_size (float): Dimension of a single voxel.
@@ -42,7 +42,7 @@ class VoxelClustering(BasePooling):
         self.bounds_min = bounds[:, 0]
         self.grid_size = (self.bounds_max - self.bounds_min) / self.voxel_size
         self.num_particle_types = num_particle_types
-        self.size = size  # Directly use precomputed size
+        # self.size = size  # Directly use precomputed size
 
     def __call__(self, positions: jnp.ndarray, particle_type: jnp.ndarray) -> Tuple[Dict[str, jnp.ndarray], jnp.ndarray]:
         """Forward pass of VoxelClustering.
@@ -54,10 +54,8 @@ class VoxelClustering(BasePooling):
         Args:
             positions: Array containing positional coordinates for each node.
                 - shape: (N, dim), absolute positions
-                - filler values according to particle_type == -1
             particle_type: Array containing particle types for each node.
                 - shape: (N), integers
-                - filler values are -1
         Returns:
             Tuple with dictionary of cluster information and coarse particle types. 
                 - Dictionary contains:
@@ -69,39 +67,22 @@ class VoxelClustering(BasePooling):
         # 1. map each node position to an index
         voxel_indices = ((positions - self.bounds_min) // self.voxel_size).astype(int)
         voxel_indices = jnp.clip(voxel_indices, 0, jnp.array(self.grid_size) - 1)
-        
-        # 2. Combine voxel indices and particle type
-        voxel_indices = jnp.where(particle_type[:, None] == -1, -1, voxel_indices)
-        combined_indices = jnp.concatenate([voxel_indices, particle_type[:, None]], axis=1)
-        
-        # 3. Get unique combinations and inverse indices
-        unique_combinations, inverse_indices = jnp.unique(
-            combined_indices,
-            axis=0,
-            return_inverse=True,
-            size=self.size + 1,
-            fill_value=-jnp.ones(combined_indices.shape[1], dtype=combined_indices.dtype)
-        )
-        
-        # 4. Check if there are any filler values; if so, adjust unique_combinations and inverse_indices
-        has_filler = jnp.any((combined_indices == -1).all(axis=1))
-        
-        unique_combinations = jnp.where(
-            has_filler,
-            unique_combinations[1:],
-            unique_combinations[:-1]
-        )
-        
-        inverse_indices = jnp.where(
-            has_filler,
-            jnp.where(inverse_indices == 0, -1, inverse_indices - 1),
-            inverse_indices
-        )
+
+        # 2. flatten voxel indices
+        flattened_voxel_indices = voxel_indices[:,0] * self.grid_size[1] + voxel_indices[:,1]
+        if self.dim == 3:
+            flattened_voxel_indices = flattened_voxel_indices * self.grid_size[2] + voxel_indices[:,2]
+
+        # 3. Combine flattened indices and particle type into a single tensor
+        combined_indices = jnp.stack([flattened_voxel_indices, particle_type], axis=-1)
+
+        # 4. Get unique combinations and inverse indices
+        unique_combinations, inverse_indices = jnp.unique(combined_indices, axis=0, return_inverse=True) # , size=self.size)
 
         # 5. Extract unique particle types from unique_combinations
         unique_particle_types = unique_combinations[:, 1].astype(int)
 
-        index_assignments = inverse_indices[:, 0]
+        index_assignments = inverse_indices[:,0]
         coarse_sample = {
             'coarse_ids': index_assignments
         }

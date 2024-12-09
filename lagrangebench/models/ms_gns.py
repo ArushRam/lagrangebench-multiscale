@@ -14,10 +14,12 @@ from functools import partial
 from lagrangebench.utils import NodeType
 
 from .base import BaseModel
-from .utils import build_mlp, scatter_mean_new
-from .pooling import VoxelClustering
+from .utils import build_mlp, scatter_mean_new, scatter_mean
+from .pooling import VoxelClustering, RandomSampling, KMeans
 
 MAX_SIZE = 40000
+SAMPLING_RATIO = 0.2
+KMEANS_CLUSTER_RATIO = 0.05
 
 class MultiScaleGNS(BaseModel):
     r"""Multi-scale Graph Network-based Simulator.
@@ -59,21 +61,14 @@ class MultiScaleGNS(BaseModel):
         assert len(mp_steps_per_scale) == num_scales
         self._num_scales = num_scales
         self._mp_steps_per_scale = mp_steps_per_scale
+
+        self._max_size = max_size
         
         if clustering_type == "voxel":
             self._base_voxel_size = 5e-2
             self._voxel_size_per_scale = [self._base_voxel_size * (2 ** i) for i in range(num_scales - 1)]
             bounds = np.array([[0.0, 1.0], [0.0, 2.0]])  # Example bounds
             
-            self._max_size = max_size
-            # grid_sizes = [
-            #     np.ceil((bounds[:, 1] - bounds[:, 0]) / voxel_size).astype(int)
-            #     for voxel_size in self._voxel_size_per_scale
-            # ]
-            # self.sizes = [
-            #     min(int(num_particle_types * np.prod(grid_size)), MAX_NUM_PARTICLES)
-            #     for grid_size in grid_sizes
-            # ]
             self._clustering_fn_per_scale = [
                 VoxelClustering(
                     voxel_size=self._voxel_size_per_scale[i],
@@ -83,17 +78,32 @@ class MultiScaleGNS(BaseModel):
                 )
                 for i in range(num_scales - 1)
             ]
-            # self._clustering_fn_per_scale = [
-            #     VoxelClustering(
-            #         voxel_size=self._voxel_size_per_scale[i],
-            #         bounds=jnp.array(bounds),
-            #         num_particle_types=self._num_particle_types,
-            #     )
-            #     for i in range(num_scales - 1)
-            # ]
+            self._scatter_fn = partial(scatter_mean_new, num_segments=self._max_size)
+
+        elif clustering_type == "random":
+            self._sampling_ratio = SAMPLING_RATIO
+            self._clustering_fn_per_scale = [
+                RandomSampling(
+                    sampling_ratio = self._sampling_ratio,
+                    num_particle_types = self._num_particle_types,
+                )
+                for i in range(num_scales - 1)
+            ]
+            # self._scatter_fn = partial(scatter_mean)
+            self._scatter_fn = partial(scatter_mean_new, num_segments=self._max_size)
+
+        elif clustering_type == "kmeans":
+            self._clustering_fn_per_scale = [
+                KMeans(
+                    cluster_ratio = KMEANS_CLUSTER_RATIO,
+                    num_particle_types = self._num_particle_types,
+                )
+                for i in range(num_scales - 1)
+            ]
+            # self._scatter_fn = partial(scatter_mean)
+            self._scatter_fn = partial(scatter_mean_new, num_segments=self._max_size)
         else:
             raise ValueError(f"Unknown clustering type: {clustering_type}")
-        self._scatter_fn = partial(scatter_mean_new, num_segments=self._max_size)
 
         self._embedding = hk.Embed(
             num_particle_types, particle_type_embedding_size

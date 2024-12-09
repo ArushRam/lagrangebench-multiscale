@@ -64,7 +64,8 @@ def train_or_infer(cfg: Union[Dict, DictConfig]):
         has_external_force=data_train.external_force_fn is not None,
         normalization_stats=case.normalization_stats,
     )
-    model = hk.without_apply_rng(hk.transform_with_state(model))
+    # model = hk.without_apply_rng(hk.transform_with_state(model))
+    model = hk.transform_with_state(model)
 
     # mixed precision training based on this reference:
     # https://github.com/deepmind/dm-haiku/blob/main/examples/imagenet/train.py

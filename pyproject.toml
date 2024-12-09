@@ -49,12 +49,12 @@ e3nn-jax = "0.20.3"
 jmp = ">=0.0.4"
 jraph = "0.0.6.dev0"
 optax = "0.1.7"
-ott-jax = ">=0.4.2"
 matscipy = ">=0.8.0"
 torch = {version = "2.3.1+cpu", source = "torchcpu"}
 wget = ">=3.2"
 omegaconf = ">=2.3.0"
 jax-sph = ">=0.0.3"
+ott-jax = ">=0.4.9"
 
 [tool.poetry.group.dev.dependencies]
 # mypy = ">=1.8.0" - consider in the future

@@ -41,8 +41,9 @@ def _mse(
     target: jnp.ndarray,
     model_fn: Callable,
     loss_weight: Dict[str, float],
+    key
 ):
-    pred, state = model_fn(params, state, (features, particle_type))
+    pred, state = model_fn(params, state, x=(features, particle_type), rng=key)
     # check active (non zero) output shapes
     assert all(target[k].shape == pred[k].shape for k in pred)
     # particle mask
@@ -248,16 +249,18 @@ class Trainer:
         # Precompile model for evaluation
         model_apply = jax.jit(model.apply)
 
-        # loss and update functions
-        loss_fn = partial(_mse, model_fn=model_apply, loss_weight=self.loss_weight)
-        update_fn = partial(_update, loss_fn=loss_fn, opt_update=self.opt_update)
-
         # init values
         raw_batch = next(iter(loader_train))
         raw_batch = jax.tree_map(lambda x: jnp.array(x), raw_batch)  # numpy to jax
         pos_input_and_target, particle_type = raw_batch
         raw_sample = (pos_input_and_target[0], particle_type[0])
         key, features, _, neighbors = case.allocate(self.base_key, raw_sample)
+
+        # loss and update functions
+        key, subkey = jax.random.split(key, 2)
+        loss_fn = partial(_mse, model_fn=model_apply, loss_weight=self.loss_weight, key=subkey)
+        # key, subkey = jax.random.split(key, 2)
+        update_fn = partial(_update, loss_fn=loss_fn, opt_update=self.opt_update)
 
         step = 0
         if params is not None:
