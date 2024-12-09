@@ -1,4 +1,4 @@
-extends: configs/rpf_2d/base.yaml
+extends: configs/tgv_2d/base.yaml
 
 model: 
   name: ms_gns
