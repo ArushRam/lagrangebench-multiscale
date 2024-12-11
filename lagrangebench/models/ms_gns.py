@@ -27,6 +27,7 @@ class MultiScaleGNS(BaseModel):
 
     def __init__(
         self,
+        metadata: Dict,
         particle_dimension: int,
         latent_size: int,
         blocks_per_step: int,
@@ -44,6 +45,7 @@ class MultiScaleGNS(BaseModel):
         """Initialize the model.
 
         Args:
+            metadata: Metadata of the simulation.
             particle_dimension: Space dimensionality (e.g. 2 or 3).
             latent_size: Size of the latent representations.
             blocks_per_step: Number of MLP layers per block.
@@ -71,9 +73,9 @@ class MultiScaleGNS(BaseModel):
         self._max_size = max_size
         
         if clustering_type == "voxel":
-            self._base_voxel_size = 5e-2
-            self._voxel_size_per_scale = [self._base_voxel_size * (2 ** i) for i in range(num_scales - 1)]
-            bounds = np.array([[0.0, 1.0], [0.0, 2.0]])  # Example bounds
+            self._base_voxel_size = metadata["dx"]
+            self._voxel_size_per_scale = [self._base_voxel_size * (2 ** i) for i in range(1, num_scales)]
+            bounds = metadata["bounds"]
             
             self._clustering_fn_per_scale = [
                 VoxelClustering(

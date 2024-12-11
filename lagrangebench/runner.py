@@ -218,6 +218,7 @@ def setup_model(
     elif model_name == "ms_gns":
         def model_fn(x):
             return models.MultiScaleGNS(
+                metadata=metadata,
                 particle_dimension=metadata["dim"],
                 latent_size=cfg.model.latent_dim,
                 blocks_per_step=cfg.model.num_mlp_layers,
