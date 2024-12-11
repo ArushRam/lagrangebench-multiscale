@@ -146,8 +146,10 @@ def push_forward_build(model_apply, case):
             params: Model parameters
             state: Model state
         """
+        # Create a dummy RNG key
+        dummy_key = jax.random.PRNGKey(0)
         # no buffer overflow check here, since push forward acts on later epochs
-        pred, _ = model_apply(params, state, (features, particle_type))
+        pred, _ = model_apply(params, state, dummy_key, (features, particle_type))
         next_pos = case.integrate(pred, current_pos)
         current_pos = jnp.concatenate(
             [current_pos[:, 1:], next_pos[:, None, :]], axis=1
