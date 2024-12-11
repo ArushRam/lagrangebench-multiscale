@@ -36,6 +36,8 @@ class MultiScaleGNS(BaseModel):
         # Multiscale GNS parameters
         num_scales: int = 1,
         mp_steps_per_scale: List[int] = [10],
+        down_mp_block_layers: int = 2,
+        up_mp_block_layers: int = 2,
         clustering_type: str = "voxel",
         max_size: int = MAX_SIZE,
     ):
@@ -49,6 +51,8 @@ class MultiScaleGNS(BaseModel):
             num_particle_types: Max number of particle types.
             num_scales: Number of scales for multi-scale message passing.
             mp_steps_per_scale: List of message passing steps per scale.
+            down_mp_block_layers: Number of MLP layers per down message passing block.
+            up_mp_block_layers: Number of MLP layers per up message passing block.
             clustering_type: Type of clustering to use ("voxel").
         """
         super().__init__()
@@ -61,6 +65,8 @@ class MultiScaleGNS(BaseModel):
         assert len(mp_steps_per_scale) == num_scales
         self._num_scales = num_scales
         self._mp_steps_per_scale = mp_steps_per_scale
+        self._down_mp_block_layers = down_mp_block_layers
+        self._up_mp_block_layers = up_mp_block_layers
 
         self._max_size = max_size
         
@@ -139,6 +145,7 @@ class MultiScaleGNS(BaseModel):
         else:
             # Store graphs and positions at each scale
             clusters_at_scales = []
+            positions_at_scales = []
 
             # Original resolution message passing
             for _ in range(self._mp_steps_per_scale[0] // 2):
@@ -149,6 +156,7 @@ class MultiScaleGNS(BaseModel):
             particle_type = jnp.concatenate([particle_type, jnp.full((self._max_size - particle_type.shape[0],), -1)])
             positions = jnp.concatenate([positions, jnp.full((self._max_size - positions.shape[0], self._output_size), 0.0)])
             graphs.append(graph)
+            positions_at_scales.append(positions)
             
             # Downward pass: scale -> scale + 1
             for scale in range(self._num_scales - 1):
@@ -157,12 +165,13 @@ class MultiScaleGNS(BaseModel):
                     scale,
                     graphs[-1], 
                     particle_type, 
-                    positions
+                    positions_at_scales[-1], 
                 )
 
-                # Buffer coarse graph and cluster assignments
+                # Buffer coarse graph, cluster assignments and positions
                 graphs.append(coarse_graph)
                 clusters_at_scales.append(clusters)
+                positions_at_scales.append(coarse_pos)
                 
                 # Message passing at this scale
                 if scale + 1 == self._num_scales:
@@ -173,13 +182,18 @@ class MultiScaleGNS(BaseModel):
                     coarse_graph = self._within_scale_message_passing(coarse_graph)
                 graphs[-1] = coarse_graph
 
-                # Update positions and particle_type for next iteration
-                positions = coarse_pos
+                # Update particle_type for next iteration
                 particle_type = coarse_particle_types
             
             # Upward pass: scale + 1 -> scale
             for scale in reversed(range(self._num_scales - 1)):
-                graphs[scale] = self._up_mp(graphs[scale], graphs[scale + 1], clusters_at_scales[scale])
+                graphs[scale] = self._up_mp(
+                    graphs[scale], 
+                    graphs[scale + 1], 
+                    clusters_at_scales[scale], 
+                    positions_at_scales[scale], 
+                    positions_at_scales[scale + 1], 
+                )
                 for _ in range(self._mp_steps_per_scale[scale] // 2):
                     graphs[scale] = self._within_scale_message_passing(graphs[scale])
             
@@ -355,9 +369,19 @@ class MultiScaleGNS(BaseModel):
         coarse_sample, pooled_particle_types = self._clustering_fn_per_scale[scale](pos, particle_type)
         clusters = coarse_sample['coarse_ids']
         
-        # Pool node features and positions
-        pooled_nodes = self._scatter_fn(graph.nodes, clusters)
+        # Compute relative positions between original nodes and their cluster centers
         pooled_pos = self._scatter_fn(pos, clusters)
+        rel_pos = pooled_pos[clusters] - pos
+        
+        # Compute new node features
+        node_features = jnp.concatenate([graph.nodes, rel_pos], axis=-1)
+        node_mlp = build_mlp(
+            latent_size=self._latent_size,
+            output_size=self._latent_size,
+            num_hidden_layers=self._down_mp_block_layers, 
+        )
+        node_features = node_mlp(node_features)
+        pooled_nodes = self._scatter_fn(node_features, clusters)
         
         # Create new edges between clusters
         new_edges, new_senders, new_receivers = create_cluster_edges(graph.edges, graph.senders, graph.receivers, clusters)
@@ -377,38 +401,53 @@ class MultiScaleGNS(BaseModel):
             clusters, 
         )
     
-    def _up_mp(self, graph_fine: jraph.GraphsTuple, graph_coarse: jraph.GraphsTuple, clusters: jnp.ndarray) -> jraph.GraphsTuple:
+    def _up_mp(
+        self, 
+        graph_fine: jraph.GraphsTuple, 
+        graph_coarse: jraph.GraphsTuple, 
+        clusters: jnp.ndarray,
+        positions_fine: jnp.ndarray,
+        positions_coarse: jnp.ndarray
+    ) -> jraph.GraphsTuple:
         """Upscale graph through unpooling based on cluster assignments"""
         # Create masks for valid nodes and edges
         fine_node_mask = clusters != -1
-        fine_edge_mask = (graph_fine.senders != -1) & (graph_fine.receivers != -1)
-        coarse_edge_mask = (graph_coarse.senders != -1) & (graph_coarse.receivers != -1)
+        # fine_edge_mask = (graph_fine.senders != -1) & (graph_fine.receivers != -1)
+        # coarse_edge_mask = (graph_coarse.senders != -1) & (graph_coarse.receivers != -1)
 
-        # Unpool node features from coarse to fine graph using cluster assignments
-        fine_nodes = graph_coarse.nodes[clusters]
+        # Calculate fine node features
+        coarse_nodes = graph_coarse.nodes[clusters]
+        rel_pos = positions_coarse[clusters] - positions_fine
+        node_features = jnp.concatenate([graph_fine.nodes, coarse_nodes, rel_pos], axis=-1)
+        node_mlp = build_mlp(
+            latent_size=self._latent_size,
+            output_size=self._latent_size,
+            num_hidden_layers=self._up_mp_block_layers,
+        )
+        fine_nodes = node_mlp(node_features)
 
-        # Unpool edge features by mapping coarse edges back to fine edges
-        fine_cluster_pairs = jnp.where(
-            fine_edge_mask[:, None],
-            jnp.stack([clusters[graph_fine.senders], clusters[graph_fine.receivers]], axis=1),
-            -1
-        )
-        coarse_cluster_pairs = jnp.where(
-            coarse_edge_mask[:, None],
-            jnp.stack([graph_coarse.senders, graph_coarse.receivers], axis=1),
-            -1
-        )
+        # # Unpool edge features by mapping coarse edges back to fine edges
+        # fine_cluster_pairs = jnp.where(
+        #     fine_edge_mask[:, None],
+        #     jnp.stack([clusters[graph_fine.senders], clusters[graph_fine.receivers]], axis=1),
+        #     -1
+        # )
+        # coarse_cluster_pairs = jnp.where(
+        #     coarse_edge_mask[:, None],
+        #     jnp.stack([graph_coarse.senders, graph_coarse.receivers], axis=1),
+        #     -1
+        # )
         
-        # For each valid fine edge, find matching coarse edge and copy features using a loop
-        # Vectorized version that works with JAX tracers
-        matches = jnp.all(fine_cluster_pairs[:, None] == coarse_cluster_pairs[None, :], axis=2) # (n_fine_edges, n_coarse_edges)
-        coarse_edge_indices = jnp.argmax(matches, axis=1)
-        coarse_edge_indices = jnp.where(fine_edge_mask, coarse_edge_indices, 0)
-        fine_edges = graph_coarse.edges[coarse_edge_indices]
+        # # For each valid fine edge, find matching coarse edge and copy features using a loop
+        # # Vectorized version that works with JAX tracers
+        # matches = jnp.all(fine_cluster_pairs[:, None] == coarse_cluster_pairs[None, :], axis=2) # (n_fine_edges, n_coarse_edges)
+        # coarse_edge_indices = jnp.argmax(matches, axis=1)
+        # coarse_edge_indices = jnp.where(fine_edge_mask, coarse_edge_indices, 0)
+        # fine_edges = graph_coarse.edges[coarse_edge_indices]
 
         return jraph.GraphsTuple(
             nodes=jnp.where(fine_node_mask[:, None], graph_fine.nodes + fine_nodes, graph_fine.nodes),
-            edges=jnp.where(fine_edge_mask[:, None], graph_fine.edges + fine_edges, graph_fine.edges),
+            edges=graph_fine.edges,
             senders=graph_fine.senders,
             receivers=graph_fine.receivers,
             n_node=graph_fine.n_node,
