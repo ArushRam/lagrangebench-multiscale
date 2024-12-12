@@ -1,3 +1,16 @@
+# LagrangeBench-Multiscale
+
+This is a fork of the LagrangeBench library, with the addition of a multiscale GNS model. Our model is implemented in the [MultiScaleGNS](lagrangebench/models/ms_gns.py) class, with clustering methods implemented in the [VoxelClustering](lagrangebench/models/pooling/voxel_clustering.py), [RandomSampling](lagrangebench/models/pooling/random_sampling.py), and [KMeans](lagrangebench/models/pooling/kmeans.py) classes.
+
+To run the model, configure the desired model parameters in one of the configuration files (e.g. [configs/tgv_2d/ms_gns.yaml](configs/tgv_2d/ms_gns.yaml)), and run the following command:
+```bash
+python main.py config=configs/tgv_2d/ms_gns.yaml
+```
+
+You can specify the number of scales of MS-GNS in the config file through the `num_scales` parameter, and customize the number of message passing layers in the `mp_steps_per_scale` parameter.
+
+# Original README
+
 <div align="center">
 
 <picture>
