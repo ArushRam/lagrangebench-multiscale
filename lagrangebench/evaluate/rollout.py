@@ -57,7 +57,7 @@ def _forward_eval(
 
     # predict acceleration and integrate
     rng = jax.random.PRNGKey(42)
-    pred, state = model_apply(params, state, x=sample, rng=rng)
+    pred, state = model_apply(params, state, rng, x=sample)
 
     next_position = case_integrate(pred, current_positions)
 

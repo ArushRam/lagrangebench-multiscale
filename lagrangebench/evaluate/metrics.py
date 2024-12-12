@@ -165,15 +165,24 @@ class MetricsComputer:
         loss_matrix_xx = self._distance_matrix(pred, pred)
         loss_matrix_yy = self._distance_matrix(target, target)
         return sinkhorn_divergence(
-            Geometry,
-            loss_matrix_xy,
-            loss_matrix_xx,
-            loss_matrix_yy,
-            # uniform weights
+            Geometry(cost_matrix=loss_matrix_xy),
+            Geometry(cost_matrix=loss_matrix_xx),
+            Geometry(cost_matrix=loss_matrix_yy),
             a=jnp.ones((pred.shape[0],)) / pred.shape[0],
             b=jnp.ones((target.shape[0],)) / target.shape[0],
-            sinkhorn_kwargs={"threshold": 1e-4},
+            threshold=1e-4,
         ).divergence
+        ### original bugged implementation
+        # return sinkhorn_divergence(
+        #     Geometry,
+        #     loss_matrix_xy,
+        #     loss_matrix_xx,
+        #     loss_matrix_yy,
+        #     # uniform weights
+        #     a=jnp.ones((pred.shape[0],)) / pred.shape[0],
+        #     b=jnp.ones((target.shape[0],)) / target.shape[0],
+        #     sinkhorn_kwargs={"threshold": 1e-4},
+        # ).divergence
 
     def _sinkhorn_pot(self, pred: jnp.ndarray, target: jnp.ndarray):
         """Jax-compatible POT implementation of Sinkorn."""

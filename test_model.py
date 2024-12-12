@@ -26,11 +26,12 @@ def load_embedded_configs(config_path: str, cli_args: DictConfig) -> DictConfig:
     cfg = OmegaConf.merge(*cfgs, cli_args)
     return cfg
 
-def create_model(cfg):
+def create_model(cfg, metadata):
     """Create the model with specified architecture."""
     def model_fn(x):
         if cfg.model.name.lower() == "ms_gns":
             return lagrangebench.models.MultiScaleGNS(
+                metadata=metadata,
                 particle_dimension=2,  # 2D dataset
                 latent_size=cfg.model.latent_dim,
                 blocks_per_step=cfg.model.num_mlp_layers,
@@ -50,7 +51,8 @@ def create_model(cfg):
         else:
             raise ValueError(f"Unknown model type: {cfg.model.name}")
             
-    return hk.without_apply_rng(hk.transform_with_state(model_fn))
+    # return hk.without_apply_rng(hk.transform_with_state(model_fn))
+    return hk.transform_with_state(model_fn)
 
 def load_checkpoint(ckpt_path):
     """Load model parameters and state from checkpoint."""
@@ -158,24 +160,24 @@ def main():
 
     # Load datasets using setup_data
     from lagrangebench.runner import setup_data
-    _, _, rpf2d_test = setup_data(cfg)
+    _, _, data_test = setup_data(cfg)
 
     # Setup case
-    bounds = np.array(rpf2d_test.metadata["bounds"])
+    bounds = np.array(data_test.metadata["bounds"])
     box = bounds[:, 1] - bounds[:, 0]
     
     rpf2d_case = lagrangebench.case_builder(
         box=box,
-        metadata=rpf2d_test.metadata,
+        metadata=data_test.metadata,
         input_seq_length=cfg.model.input_seq_length,
         cfg_neighbors=cfg.neighbors,
         cfg_model=cfg.model,
         noise_std=cfg.train.noise_std,
-        external_force_fn=rpf2d_test.external_force_fn,
+        external_force_fn=data_test.external_force_fn,
     )
 
     # Create and load model
-    model = create_model(cfg)
+    model = create_model(cfg, data_test.metadata)
     params, state = load_checkpoint(cfg.load_ckp)
 
     # Setup evaluation config
@@ -189,7 +191,7 @@ def main():
 
     # Evaluate model
     metrics, rollout = evaluate_model(
-        model, params, state, rpf2d_test, rpf2d_case, cfg_eval_infer
+        model, params, state, data_test, rpf2d_case, cfg_eval_infer
     )
 
     # Generate visualizations

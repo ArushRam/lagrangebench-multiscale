@@ -17,7 +17,7 @@ from .base import BaseModel
 from .utils import build_mlp, scatter_mean_new, scatter_mean
 from .pooling import VoxelClustering, RandomSampling, KMeans
 
-MAX_SIZE = 40000
+MAX_SIZE = 50000
 SAMPLING_RATIO = 0.2
 KMEANS_CLUSTER_RATIO = 0.05
 
