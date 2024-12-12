@@ -2,12 +2,18 @@
 
 This is a fork of the LagrangeBench library, with the addition of a multiscale GNS model. Our model is implemented in the [MultiScaleGNS](lagrangebench/models/ms_gns.py) class, with clustering methods implemented in the [VoxelClustering](lagrangebench/models/pooling/voxel_clustering.py), [RandomSampling](lagrangebench/models/pooling/random_sampling.py), and [KMeans](lagrangebench/models/pooling/kmeans.py) classes.
 
-To run the model, configure the desired model parameters in one of the configuration files (e.g. [configs/tgv_2d/ms_gns.yaml](configs/tgv_2d/ms_gns.yaml)), and run the following command:
+To train and evaluate the model, configure the desired model parameters in one of the configuration files (e.g. [configs/tgv_2d/ms_gns.yaml](configs/tgv_2d/ms_gns.yaml)), and run the following command:
 ```bash
 python main.py config=configs/tgv_2d/ms_gns.yaml
 ```
 
 You can specify the number of scales of MS-GNS in the config file through the `num_scales` parameter, and customize the number of message passing layers in the `mp_steps_per_scale` parameter.
+
+To see visualizations of the model's performance, you can run, for example, the following command:
+```bash
+python test_model.py load_ckp=ckp/gns_tgv2d_{YYYYMMDD}-{HHMMSS}
+```
+where `{YYYYMMDD}-{HHMMSS}` is the timestamp of the checkpoint you want to load. This will generate a gif of the model's performance as well as a metrics file in the `media/gns_tgv2d_{YYYYMMDD}-{HHMMSS}` directory.
 
 # Original README
 
